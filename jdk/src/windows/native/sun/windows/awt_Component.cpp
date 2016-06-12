@@ -1382,7 +1382,7 @@ LRESULT AwtComponent::WindowProc(UINT message, WPARAM wParam, LPARAM lParam)
       case WM_AWT_RELEASEDC:
       {
             HDC hDC = (HDC)wParam;
-            MoveDCToPassiveList(hDC);
+            MoveDCToPassiveList(hDC, GetHWnd());
             ReleaseDCList(GetHWnd(), passiveDCList);
             mr = mrConsume;
             break;
@@ -5200,6 +5200,8 @@ void AwtComponent::SynthesizeMouseMessage(JNIEnv *env, jobject mouseEvent)
                 message = WM_MBUTTONDOWN; break;
             case java_awt_event_MouseEvent_BUTTON2:
                 message = WM_RBUTTONDOWN; break;
+            default:
+                return;
           }
           break;
       }
@@ -5211,6 +5213,8 @@ void AwtComponent::SynthesizeMouseMessage(JNIEnv *env, jobject mouseEvent)
                 message = WM_MBUTTONUP; break;
             case java_awt_event_MouseEvent_BUTTON2:
                 message = WM_RBUTTONUP; break;
+            default:
+                return;
           }
           break;
       }
@@ -7174,8 +7178,8 @@ void DCList::AddDCItem(DCItem *newItem)
 }
 
 /**
- * Given a DC, remove it from the DC list and return
- * TRUE if it exists on the current list.  Otherwise
+ * Given a DC and window handle, remove the DC from the DC list
+ * and return TRUE if it exists on the current list.  Otherwise
  * return FALSE.
  * A DC may not exist on the list because it has already
  * been released elsewhere (for example, the window
@@ -7183,14 +7187,14 @@ void DCList::AddDCItem(DCItem *newItem)
  * thread may also want to release a DC when it notices that
  * its DC is obsolete for the current window).
  */
-DCItem *DCList::RemoveDC(HDC hDC)
+DCItem *DCList::RemoveDC(HDC hDC, HWND hWnd)
 {
     listLock.Enter();
     DCItem **prevPtrPtr = &head;
     DCItem *listPtr = head;
     while (listPtr) {
         DCItem *nextPtr = listPtr->next;
-        if (listPtr->hDC == hDC) {
+        if (listPtr->hDC == hDC && listPtr->hWnd == hWnd) {
             *prevPtrPtr = nextPtr;
             break;
         }
@@ -7244,9 +7248,9 @@ void DCList::RealizePalettes(int screen)
     listLock.Leave();
 }
 
-void MoveDCToPassiveList(HDC hDC) {
+void MoveDCToPassiveList(HDC hDC, HWND hWnd) {
     DCItem *removedDC;
-    if ((removedDC = activeDCList.RemoveDC(hDC)) != NULL) {
+    if ((removedDC = activeDCList.RemoveDC(hDC, hWnd)) != NULL) {
         passiveDCList.AddDCItem(removedDC);
     }
 }

@@ -33,6 +33,7 @@ import static jdk.nashorn.internal.runtime.ScriptRuntime.UNDEFINED;
 import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.MethodType;
+import java.math.RoundingMode;
 import java.text.NumberFormat;
 import java.util.Locale;
 import jdk.internal.dynalink.linker.GuardedInvocation;
@@ -48,6 +49,7 @@ import jdk.nashorn.internal.runtime.JSType;
 import jdk.nashorn.internal.runtime.PropertyMap;
 import jdk.nashorn.internal.runtime.ScriptObject;
 import jdk.nashorn.internal.runtime.ScriptRuntime;
+import jdk.nashorn.internal.runtime.linker.NashornGuards;
 import jdk.nashorn.internal.runtime.linker.PrimitiveLookup;
 
 /**
@@ -187,6 +189,7 @@ public final class NativeNumber extends ScriptObject {
         format.setMinimumFractionDigits(fractionDigits);
         format.setMaximumFractionDigits(fractionDigits);
         format.setGroupingUsed(false);
+        format.setRoundingMode(RoundingMode.HALF_UP);
 
         return format.format(x);
     }
@@ -320,7 +323,7 @@ public final class NativeNumber extends ScriptObject {
      * @return Link to be invoked at call site.
      */
     public static GuardedInvocation lookupPrimitive(final LinkRequest request, final Object receiver) {
-        return PrimitiveLookup.lookupPrimitive(request, Number.class, new NativeNumber(((Number)receiver).doubleValue()), WRAPFILTER, PROTOFILTER);
+        return PrimitiveLookup.lookupPrimitive(request, NashornGuards.getNumberGuard(), new NativeNumber(((Number)receiver).doubleValue()), WRAPFILTER, PROTOFILTER);
     }
 
     @SuppressWarnings("unused")

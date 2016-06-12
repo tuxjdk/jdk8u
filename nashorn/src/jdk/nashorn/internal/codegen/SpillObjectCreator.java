@@ -61,7 +61,7 @@ public final class SpillObjectCreator extends ObjectCreator<Expression> {
     }
 
     @Override
-    protected void makeObject(final MethodEmitter method) {
+    public void createObject(final MethodEmitter method) {
         assert !isScope() : "spill scope objects are not currently supported";
 
         final int          length        = tuples.size();
@@ -69,9 +69,7 @@ public final class SpillObjectCreator extends ObjectCreator<Expression> {
         final int          spillLength   = ScriptObject.spillAllocationLength(length);
         final long[]       jpresetValues = dualFields ? new long[spillLength] : null;
         final Object[]     opresetValues = new Object[spillLength];
-        final Set<Integer> postsetValues = new LinkedHashSet<>();
-        final int          callSiteFlags = codegen.getCallSiteFlags();
-        final Class<?>     objectClass   = dualFields ? JD.class : JO.class;
+        final Class<?>     objectClass   = getAllocatorClass();
         ArrayData          arrayData     = ArrayData.allocate(ScriptRuntime.EMPTY_ARRAY);
 
         // Compute constant property values
@@ -85,9 +83,7 @@ public final class SpillObjectCreator extends ObjectCreator<Expression> {
 
             if (value != null) {
                 final Object constantValue = LiteralNode.objectAsConstant(value);
-                if (constantValue == LiteralNode.POSTSET_MARKER) {
-                    postsetValues.add(pos);
-                } else {
+                if (constantValue != LiteralNode.POSTSET_MARKER) {
                     final Property property = propertyMap.findProperty(key);
                     if (property != null) {
                         // normal property key
@@ -113,8 +109,6 @@ public final class SpillObjectCreator extends ObjectCreator<Expression> {
                         //avoid blowing up the array if we can
                         if (constantValue instanceof Integer) {
                             arrayData = arrayData.set(index, ((Integer)constantValue).intValue(), false);
-                        } else if (constantValue instanceof Long) {
-                            arrayData = arrayData.set(index, ((Long)constantValue).longValue(), false);
                         } else if (constantValue instanceof Double) {
                             arrayData = arrayData.set(index, ((Double)constantValue).doubleValue(), false);
                         } else {
@@ -146,30 +140,39 @@ public final class SpillObjectCreator extends ObjectCreator<Expression> {
         // instantiate the script object with spill objects
         method.invoke(constructorNoLookup(objectClass, PropertyMap.class, long[].class, Object[].class));
 
-        helpOptimisticRecognizeDuplicateIdentity(method);
-
         // Set prefix array data if any
         if (arrayData.length() > 0) {
             method.dup();
             codegen.loadConstant(arrayData);
             method.invoke(virtualCallNoLookup(ScriptObject.class, "setArray", void.class, ArrayData.class));
         }
+    }
+
+    @Override
+    public void populateRange(final MethodEmitter method, final Type objectType, final int objectSlot, final int start, final int end) {
+        final int  callSiteFlags = codegen.getCallSiteFlags();
+        method.load(objectType, objectSlot);
 
         // set postfix values
-        for (final int i : postsetValues) {
+        for (int i = start; i < end; i++) {
             final MapTuple<Expression> tuple = tuples.get(i);
+
+            if (LiteralNode.isConstant(tuple.value)) {
+                continue;
+            }
+
             final Property property = propertyMap.findProperty(tuple.key);
+
             if (property == null) {
                 final int index = ArrayIndex.getArrayIndex(tuple.key);
                 assert ArrayIndex.isValidArrayIndex(index);
                 method.dup();
-                method.load(ArrayIndex.toLongIndex(index));
-                //method.println("putting " + tuple + " into arraydata");
-                loadTuple(method, tuple);
+                loadIndex(method, ArrayIndex.toLongIndex(index));
+                loadTuple(method, tuple, false);
                 method.dynamicSetIndex(callSiteFlags);
             } else {
                 method.dup();
-                loadTuple(method, tuple);
+                loadTuple(method, tuple, false);
                 method.dynamicSet(property.getKey(), codegen.getCallSiteFlags(), false);
             }
         }
@@ -178,8 +181,7 @@ public final class SpillObjectCreator extends ObjectCreator<Expression> {
     @Override
     protected PropertyMap makeMap() {
         assert propertyMap == null : "property map already initialized";
-        final boolean dualFields = codegen.useDualFields();
-        final Class<? extends ScriptObject> clazz = dualFields ? JD.class : JO.class;
+        final Class<? extends ScriptObject> clazz = getAllocatorClass();
         propertyMap = new MapCreator<>(clazz, tuples).makeSpillMap(false, codegen.useDualFields());
         return propertyMap;
     }
@@ -187,5 +189,10 @@ public final class SpillObjectCreator extends ObjectCreator<Expression> {
     @Override
     protected void loadValue(final Expression expr, final Type type) {
         codegen.loadExpressionAsType(expr, type);
+    }
+
+    @Override
+    protected Class<? extends ScriptObject> getAllocatorClass() {
+        return codegen.useDualFields() ? JD.class : JO.class;
     }
 }

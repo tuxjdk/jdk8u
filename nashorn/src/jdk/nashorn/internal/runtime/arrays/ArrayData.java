@@ -52,9 +52,6 @@ public abstract class ArrayData {
     /** Minimum chunk size for underlying arrays */
     protected static final int CHUNK_SIZE = 32;
 
-    /** Mask for getting a chunk */
-    protected static final int CHUNK_MASK = CHUNK_SIZE - 1;
-
     /** Untouched data - still link callsites as IntArrayData, but expands to
      *  a proper ArrayData when we try to write to it */
     public static final ArrayData EMPTY_ARRAY = new UntouchedArrayData();
@@ -164,22 +161,12 @@ public abstract class ArrayData {
         }
 
         @Override
-        public ArrayData set(final int index, final long value, final boolean strict) {
-            return toRealArrayData(index).set(index, value, strict);
-        }
-
-        @Override
         public ArrayData set(final int index, final double value, final boolean strict) {
             return toRealArrayData(index).set(index, value, strict);
         }
 
         @Override
         public int getInt(final int index) {
-            throw new ArrayIndexOutOfBoundsException(index); //empty
-        }
-
-        @Override
-        public long getLong(final int index) {
             throw new ArrayIndexOutOfBoundsException(index); //empty
         }
 
@@ -258,7 +245,7 @@ public abstract class ArrayData {
      * Factory method for unspecified array - start as int
      * @return ArrayData
      */
-    public final static ArrayData initialArray() {
+    public static ArrayData initialArray() {
         return new IntArrayData();
     }
 
@@ -278,7 +265,7 @@ public abstract class ArrayData {
      * @param size size required
      * @return size given, always &gt;= size
      */
-    protected final static int alignUp(final int size) {
+    protected static int alignUp(final int size) {
         return size + CHUNK_SIZE - 1 & ~(CHUNK_SIZE - 1);
     }
 
@@ -288,13 +275,13 @@ public abstract class ArrayData {
      * @param length the initial length
      * @return ArrayData
      */
-    public static final ArrayData allocate(final int length) {
-        if (length == 0) {
+    public static ArrayData allocate(final long length) {
+        if (length == 0L) {
             return new IntArrayData();
         } else if (length >= SparseArrayData.MAX_DENSE_LENGTH) {
             return new SparseArrayData(EMPTY_ARRAY, length);
         } else {
-            return new DeletedRangeArrayFilter(new IntArrayData(length), 0, length - 1);
+            return new DeletedRangeArrayFilter(new IntArrayData((int) length), 0, length - 1);
         }
     }
 
@@ -304,13 +291,11 @@ public abstract class ArrayData {
      * @param  array the array
      * @return ArrayData wrapping this array
      */
-    public static final ArrayData allocate(final Object array) {
+    public static ArrayData allocate(final Object array) {
         final Class<?> clazz = array.getClass();
 
         if (clazz == int[].class) {
             return new IntArrayData((int[])array, ((int[])array).length);
-        } else if (clazz == long[].class) {
-            return new LongArrayData((long[])array, ((long[])array).length);
         } else if (clazz == double[].class) {
             return new NumberArrayData((double[])array, ((double[])array).length);
         } else {
@@ -324,7 +309,7 @@ public abstract class ArrayData {
      * @param array the array to use for initial elements
      * @return the ArrayData
      */
-    public static final ArrayData allocate(final int[] array) {
+    public static ArrayData allocate(final int[] array) {
          return new IntArrayData(array, array.length);
     }
 
@@ -334,17 +319,7 @@ public abstract class ArrayData {
      * @param array the array to use for initial elements
      * @return the ArrayData
      */
-    public static final ArrayData allocate(final long[] array) {
-        return new LongArrayData(array, array.length);
-    }
-
-    /**
-     * Allocate an ArrayData wrapping a given array
-     *
-     * @param array the array to use for initial elements
-     * @return the ArrayData
-     */
-    public static final ArrayData allocate(final double[] array) {
+    public static ArrayData allocate(final double[] array) {
         return new NumberArrayData(array, array.length);
     }
 
@@ -354,7 +329,7 @@ public abstract class ArrayData {
      * @param array the array to use for initial elements
      * @return the ArrayData
      */
-    public static final ArrayData allocate(final Object[] array) {
+    public static ArrayData allocate(final Object[] array) {
         return new ObjectArrayData(array, array.length);
     }
 
@@ -364,7 +339,7 @@ public abstract class ArrayData {
      * @param buf the nio ByteBuffer to wrap
      * @return the ArrayData
      */
-    public static final ArrayData allocate(final ByteBuffer buf) {
+    public static ArrayData allocate(final ByteBuffer buf) {
         return new ByteBufferArrayData(buf);
     }
 
@@ -374,7 +349,7 @@ public abstract class ArrayData {
      * @param underlying  the underlying ArrayData to wrap in the freeze filter
      * @return the frozen ArrayData
      */
-    public static final ArrayData freeze(final ArrayData underlying) {
+    public static ArrayData freeze(final ArrayData underlying) {
         return new FrozenArrayFilter(underlying);
     }
 
@@ -384,7 +359,7 @@ public abstract class ArrayData {
      * @param underlying  the underlying ArrayData to wrap in the seal filter
      * @return the sealed ArrayData
      */
-    public static final ArrayData seal(final ArrayData underlying) {
+    public static ArrayData seal(final ArrayData underlying) {
         return new SealedArrayFilter(underlying);
     }
 
@@ -394,7 +369,7 @@ public abstract class ArrayData {
      * @param  underlying the underlying ArrayData to wrap in the non extensible filter
      * @return new array data, filtered
      */
-    public static final ArrayData preventExtension(final ArrayData underlying) {
+    public static ArrayData preventExtension(final ArrayData underlying) {
         return new NonExtensibleArrayFilter(underlying);
     }
 
@@ -404,7 +379,7 @@ public abstract class ArrayData {
      * @param underlying the underlying ArrayDAta to wrap in the non extensible filter
      * @return new array data, filtered
      */
-    public static final ArrayData setIsLengthNotWritable(final ArrayData underlying) {
+    public static ArrayData setIsLengthNotWritable(final ArrayData underlying) {
         return new LengthNotWritableFilter(underlying);
     }
 
@@ -537,16 +512,6 @@ public abstract class ArrayData {
     public abstract ArrayData set(final int index, final int value, final boolean strict);
 
     /**
-     * Set a long value at a given index
-     *
-     * @param index the index
-     * @param value the value
-     * @param strict are we in strict mode
-     * @return new array data (or same)
-     */
-    public abstract ArrayData set(final int index, final long value, final boolean strict);
-
-    /**
      * Set an double value at a given index
      *
      * @param index the index
@@ -609,26 +574,6 @@ public abstract class ArrayData {
     }
 
     /**
-     * Get a long value from a given index
-     *
-     * @param index the index
-     * @return the value
-     */
-    public abstract long getLong(final int index);
-
-    /**
-     * Get optimistic long - default is that it's impossible. Overridden
-     * by arrays that actually represents longs or narrower
-     *
-     * @param index        the index
-     * @param programPoint program point
-     * @return the value
-     */
-    public long getLongOptimistic(final int index, final int programPoint) {
-        throw new UnwarrantedOptimismException(getObject(index), programPoint, getOptimisticType());
-    }
-
-    /**
      * Get a double value from a given index
      *
      * @param index the index
@@ -676,16 +621,31 @@ public abstract class ArrayData {
     }
 
     /**
-     * Returns if element at specific index range can be deleted or not.
+     * Returns if element at specific index can be deleted or not.
      *
-     * @param fromIndex  the start index
-     * @param toIndex    the end index
+     * @param longIndex  the index
      * @param strict     are we in strict mode
      *
      * @return true if range can be deleted
      */
-    public boolean canDelete(final long fromIndex, final long toIndex, final boolean strict) {
+    public boolean canDelete(final long longIndex, final boolean strict) {
         return true;
+    }
+
+    /**
+     * Delete a range from the array if {@code fromIndex} is less than or equal to {@code toIndex}
+     * and the array supports deletion.
+     *
+     * @param fromIndex  the start index (inclusive)
+     * @param toIndex    the end index (inclusive)
+     * @param strict     are we in strict mode
+     * @return an array with the range deleted, or this array if no deletion took place
+     */
+    public final ArrayData safeDelete(final long fromIndex, final long toIndex, final boolean strict) {
+        if (fromIndex <= toIndex && canDelete(fromIndex, strict)) {
+            return delete(fromIndex, toIndex);
+        }
+        return this;
     }
 
     /**
@@ -806,12 +766,8 @@ public abstract class ArrayData {
                 return Object.class;
             }
             final Class<?> itemClass = item.getClass();
-            if (itemClass == Long.class) {
+            if (itemClass == Double.class || itemClass == Float.class || itemClass == Long.class) {
                 if (widest == Integer.class) {
-                    widest = Long.class;
-                }
-            } else if (itemClass == Double.class || itemClass == Float.class) {
-                if (widest == Integer.class || widest == Long.class) {
                     widest = Double.class;
                 }
             } else if (itemClass != Integer.class && itemClass != Short.class && itemClass != Byte.class) {

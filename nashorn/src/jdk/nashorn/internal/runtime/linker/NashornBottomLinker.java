@@ -27,6 +27,8 @@ package jdk.nashorn.internal.runtime.linker;
 
 import static jdk.nashorn.internal.lookup.Lookup.MH;
 import static jdk.nashorn.internal.runtime.ECMAErrors.typeError;
+import static jdk.nashorn.internal.runtime.JSType.GET_UNDEFINED;
+import static jdk.nashorn.internal.runtime.JSType.TYPE_OBJECT_INDEX;
 import static jdk.nashorn.internal.runtime.ScriptRuntime.UNDEFINED;
 
 import java.lang.invoke.MethodHandle;
@@ -92,7 +94,7 @@ final class NashornBottomLinker implements GuardingDynamicLinker, GuardingTypeCo
             if(BeansLinker.isDynamicMethod(self)) {
                 throw typeError("method.not.constructor", ScriptRuntime.safeToString(self));
             }
-            throw typeError("not.a.function", ScriptRuntime.safeToString(self));
+            throw typeError("not.a.function", desc.getFunctionErrorMessage(self));
         case "call":
             if(BeansLinker.isDynamicConstructor(self)) {
                 throw typeError("constructor.requires.new", ScriptRuntime.safeToString(self));
@@ -100,10 +102,12 @@ final class NashornBottomLinker implements GuardingDynamicLinker, GuardingTypeCo
             if(BeansLinker.isDynamicMethod(self)) {
                 throw typeError("no.method.matches.args", ScriptRuntime.safeToString(self));
             }
-            throw typeError("not.a.function", ScriptRuntime.safeToString(self));
+            throw typeError("not.a.function", desc.getFunctionErrorMessage(self));
         case "callMethod":
-        case "getMethod":
             throw typeError("no.such.function", getArgument(linkRequest), ScriptRuntime.safeToString(self));
+        case "getMethod":
+            // evaluate to undefined, later on Undefined will take care of throwing TypeError
+            return getInvocation(MH.dropArguments(GET_UNDEFINED.get(TYPE_OBJECT_INDEX), 0, Object.class), self, linkerServices, desc);
         case "getProp":
         case "getElem":
             if(NashornCallSiteDescriptor.isOptimistic(desc)) {
@@ -137,8 +141,9 @@ final class NashornBottomLinker implements GuardingDynamicLinker, GuardingTypeCo
     }
 
     /**
-     * Main part of the implementation of {@link GuardingTypeConverterFactory#convertToType(Class, Class)} that doesn't
-     * care about adapting the method signature; that's done by the invoking method. Returns conversion from Object to String/number/boolean (JS primitive types).
+     * Main part of the implementation of {@link GuardingTypeConverterFactory#convertToType} that doesn't
+     * care about adapting the method signature; that's done by the invoking method. Returns conversion
+     * from Object to String/number/boolean (JS primitive types).
      * @param sourceType the source type
      * @param targetType the target type
      * @return a guarded invocation that converts from the source type to the target type.

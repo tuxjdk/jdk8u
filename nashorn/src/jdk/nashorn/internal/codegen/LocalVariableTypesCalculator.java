@@ -54,7 +54,6 @@ import jdk.nashorn.internal.ir.Expression;
 import jdk.nashorn.internal.ir.ExpressionStatement;
 import jdk.nashorn.internal.ir.ForNode;
 import jdk.nashorn.internal.ir.FunctionNode;
-import jdk.nashorn.internal.ir.FunctionNode.CompilationState;
 import jdk.nashorn.internal.ir.GetSplitState;
 import jdk.nashorn.internal.ir.IdentNode;
 import jdk.nashorn.internal.ir.IfNode;
@@ -88,6 +87,7 @@ import jdk.nashorn.internal.ir.VarNode;
 import jdk.nashorn.internal.ir.WhileNode;
 import jdk.nashorn.internal.ir.WithNode;
 import jdk.nashorn.internal.ir.visitor.NodeVisitor;
+import jdk.nashorn.internal.ir.visitor.SimpleNodeVisitor;
 import jdk.nashorn.internal.parser.TokenType;
 
 /**
@@ -106,7 +106,7 @@ import jdk.nashorn.internal.parser.TokenType;
  * instances of the calculator to be run on nested functions (when not lazy compiling).
  *
  */
-final class LocalVariableTypesCalculator extends NodeVisitor<LexicalContext>{
+final class LocalVariableTypesCalculator extends SimpleNodeVisitor {
 
     private static class JumpOrigin {
         final JoinPredecessor node;
@@ -131,7 +131,6 @@ final class LocalVariableTypesCalculator extends NodeVisitor<LexicalContext>{
         UNDEFINED(Type.UNDEFINED),
         BOOLEAN(Type.BOOLEAN),
         INT(Type.INT),
-        LONG(Type.LONG),
         DOUBLE(Type.NUMBER),
         OBJECT(Type.OBJECT);
 
@@ -272,12 +271,9 @@ final class LocalVariableTypesCalculator extends NodeVisitor<LexicalContext>{
     }
 
     private static class SymbolConversions {
-        private static byte I2L = 1 << 0;
-        private static byte I2D = 1 << 1;
-        private static byte I2O = 1 << 2;
-        private static byte L2D = 1 << 3;
-        private static byte L2O = 1 << 4;
-        private static byte D2O = 1 << 5;
+        private static final byte I2D = 1 << 0;
+        private static final byte I2O = 1 << 1;
+        private static final byte D2O = 1 << 2;
 
         private byte conversions;
 
@@ -288,26 +284,11 @@ final class LocalVariableTypesCalculator extends NodeVisitor<LexicalContext>{
             case INT:
             case BOOLEAN:
                 switch (to) {
-                case LONG:
-                    recordConversion(I2L);
-                    return;
                 case DOUBLE:
                     recordConversion(I2D);
                     return;
                 case OBJECT:
                     recordConversion(I2O);
-                    return;
-                default:
-                    illegalConversion(from, to);
-                    return;
-                }
-            case LONG:
-                switch (to) {
-                case DOUBLE:
-                    recordConversion(L2D);
-                    return;
-                case OBJECT:
-                    recordConversion(L2O);
                     return;
                 default:
                     illegalConversion(from, to);
@@ -340,23 +321,12 @@ final class LocalVariableTypesCalculator extends NodeVisitor<LexicalContext>{
                 if(hasConversion(D2O)) {
                     symbol.setHasSlotFor(Type.NUMBER);
                 }
-                if(hasConversion(L2O)) {
-                    symbol.setHasSlotFor(Type.LONG);
-                }
                 if(hasConversion(I2O)) {
                     symbol.setHasSlotFor(Type.INT);
                 }
             }
             if(symbol.hasSlotFor(Type.NUMBER)) {
-                if(hasConversion(L2D)) {
-                    symbol.setHasSlotFor(Type.LONG);
-                }
                 if(hasConversion(I2D)) {
-                    symbol.setHasSlotFor(Type.INT);
-                }
-            }
-            if(symbol.hasSlotFor(Type.LONG)) {
-                if(hasConversion(I2L)) {
                     symbol.setHasSlotFor(Type.INT);
                 }
             }
@@ -378,7 +348,7 @@ final class LocalVariableTypesCalculator extends NodeVisitor<LexicalContext>{
         if(lvarType != null) {
             return lvarType;
         }
-        assert type.isObject();
+        assert type.isObject() : "Unsupported primitive type: " + type;
         return LvarType.OBJECT;
     }
     private static LvarType widestLvarType(final LvarType t1, final LvarType t2) {
@@ -426,7 +396,6 @@ final class LocalVariableTypesCalculator extends NodeVisitor<LexicalContext>{
     private final Deque<Label> catchLabels = new ArrayDeque<>();
 
     LocalVariableTypesCalculator(final Compiler compiler) {
-        super(new LexicalContext());
         this.compiler = compiler;
     }
 
@@ -1331,7 +1300,7 @@ final class LocalVariableTypesCalculator extends NodeVisitor<LexicalContext>{
         // Sets the return type of the function and also performs the bottom-up pass of applying type and conversion
         // information to nodes as well as doing the calculation on nested functions as required.
         FunctionNode newFunction = functionNode;
-        final NodeVisitor<LexicalContext> applyChangesVisitor = new NodeVisitor<LexicalContext>(new LexicalContext()) {
+        final SimpleNodeVisitor applyChangesVisitor = new SimpleNodeVisitor() {
             private boolean inOuterFunction = true;
             private final Deque<JoinPredecessor> joinPredecessors = new ArrayDeque<>();
 
@@ -1478,7 +1447,6 @@ final class LocalVariableTypesCalculator extends NodeVisitor<LexicalContext>{
         newFunction = newFunction.setReturnType(lc, returnType);
 
 
-        newFunction = newFunction.setState(lc, CompilationState.LOCAL_VARIABLE_TYPES_CALCULATED);
         newFunction = newFunction.setParameters(lc, newFunction.visitParameters(applyChangesVisitor));
         return newFunction;
     }

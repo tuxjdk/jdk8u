@@ -37,9 +37,7 @@ import jdk.nashorn.internal.ir.CaseNode;
 import jdk.nashorn.internal.ir.EmptyNode;
 import jdk.nashorn.internal.ir.Expression;
 import jdk.nashorn.internal.ir.FunctionNode;
-import jdk.nashorn.internal.ir.FunctionNode.CompilationState;
 import jdk.nashorn.internal.ir.IfNode;
-import jdk.nashorn.internal.ir.LexicalContext;
 import jdk.nashorn.internal.ir.LiteralNode;
 import jdk.nashorn.internal.ir.LiteralNode.ArrayLiteralNode;
 import jdk.nashorn.internal.ir.Node;
@@ -48,7 +46,7 @@ import jdk.nashorn.internal.ir.SwitchNode;
 import jdk.nashorn.internal.ir.TernaryNode;
 import jdk.nashorn.internal.ir.UnaryNode;
 import jdk.nashorn.internal.ir.VarNode;
-import jdk.nashorn.internal.ir.visitor.NodeVisitor;
+import jdk.nashorn.internal.ir.visitor.SimpleNodeVisitor;
 import jdk.nashorn.internal.runtime.Context;
 import jdk.nashorn.internal.runtime.JSType;
 import jdk.nashorn.internal.runtime.ScriptRuntime;
@@ -60,12 +58,11 @@ import jdk.nashorn.internal.runtime.logging.Logger;
  * Simple constant folding pass, executed before IR is starting to be lowered.
  */
 @Logger(name="fold")
-final class FoldConstants extends NodeVisitor<LexicalContext> implements Loggable {
+final class FoldConstants extends SimpleNodeVisitor implements Loggable {
 
     private final DebugLogger log;
 
     FoldConstants(final Compiler compiler) {
-        super(new LexicalContext());
         this.log = initLogger(compiler.getContext());
     }
 
@@ -101,7 +98,7 @@ final class FoldConstants extends NodeVisitor<LexicalContext> implements Loggabl
 
     @Override
     public Node leaveFunctionNode(final FunctionNode functionNode) {
-        return functionNode.setState(lc, CompilationState.CONSTANT_FOLDED);
+        return functionNode;
     }
 
     @Override
@@ -117,7 +114,7 @@ final class FoldConstants extends NodeVisitor<LexicalContext> implements Loggabl
                 statements.addAll(executed.getStatements()); // Get statements form executed branch
             }
             if (dropped != null) {
-                extractVarNodes(dropped, statements); // Get var-nodes from non-executed branch
+                extractVarNodesFromDeadCode(dropped, statements); // Get var-nodes from non-executed branch
             }
             if (statements.isEmpty()) {
                 return new EmptyNode(ifNode);
@@ -186,12 +183,25 @@ final class FoldConstants extends NodeVisitor<LexicalContext> implements Loggabl
         protected abstract LiteralNode<?> eval();
     }
 
-    private static void extractVarNodes(final Block block, final List<Statement> statements) {
-        final LexicalContext lc = new LexicalContext();
-        block.accept(lc, new NodeVisitor<LexicalContext>(lc) {
+    /**
+     * When we eliminate dead code, we must preserve var declarations as they are scoped to the whole
+     * function. This method gathers var nodes from code passed to it, removing their initializers.
+     *
+     * @param deadCodeRoot the root node of eliminated dead code
+     * @param statements a list that will be receiving the var nodes from the dead code, with their
+     * initializers removed.
+     */
+    static void extractVarNodesFromDeadCode(final Node deadCodeRoot, final List<Statement> statements) {
+        deadCodeRoot.accept(new SimpleNodeVisitor() {
             @Override
             public boolean enterVarNode(final VarNode varNode) {
                 statements.add(varNode.setInit(null));
+                return false;
+            }
+
+            @Override
+            public boolean enterFunctionNode(final FunctionNode functionNode) {
+                // Don't descend into nested functions
                 return false;
             }
         });
@@ -224,6 +234,8 @@ final class FoldConstants extends NodeVisitor<LexicalContext> implements Loggabl
             case ADD:
                 if (rhsInteger) {
                     literalNode = LiteralNode.newInstance(token, finish, rhs.getInt32());
+                } else if (rhsType.isLong()) {
+                    literalNode = LiteralNode.newInstance(token, finish, rhs.getLong());
                 } else {
                     literalNode = LiteralNode.newInstance(token, finish, rhs.getNumber());
                 }
@@ -231,6 +243,8 @@ final class FoldConstants extends NodeVisitor<LexicalContext> implements Loggabl
             case SUB:
                 if (rhsInteger && rhs.getInt32() != 0) { // @see test/script/basic/minuszero.js
                     literalNode = LiteralNode.newInstance(token, finish, -rhs.getInt32());
+                } else if (rhsType.isLong() && rhs.getLong() != 0L) {
+                    literalNode = LiteralNode.newInstance(token, finish, -rhs.getLong());
                 } else {
                     literalNode = LiteralNode.newInstance(token, finish, -rhs.getNumber());
                 }
@@ -293,9 +307,7 @@ final class FoldConstants extends NodeVisitor<LexicalContext> implements Loggabl
             final Type widest = Type.widest(lhs.getType(), rhs.getType());
 
             boolean isInteger = widest.isInteger();
-            boolean isLong    = widest.isLong();
-
-            double value;
+            final double value;
 
             switch (parent.tokenType()) {
             case DIV:
@@ -322,7 +334,8 @@ final class FoldConstants extends NodeVisitor<LexicalContext> implements Loggabl
                 value = lhs.getNumber() - rhs.getNumber();
                 break;
             case SHR:
-                return LiteralNode.newInstance(token, finish, JSType.toUint32(lhs.getInt32() >>> rhs.getInt32()));
+                final long result = JSType.toUint32(lhs.getInt32() >>> rhs.getInt32());
+                return LiteralNode.newInstance(token, finish, JSType.toNarrowestNumber(result));
             case SAR:
                 return LiteralNode.newInstance(token, finish, lhs.getInt32() >> rhs.getInt32());
             case SHL:
@@ -353,13 +366,10 @@ final class FoldConstants extends NodeVisitor<LexicalContext> implements Loggabl
                 return null;
             }
 
-            isInteger &= JSType.isRepresentableAsInt(value) && !JSType.isNegativeZero(value);
-            isLong    &= JSType.isRepresentableAsLong(value) && !JSType.isNegativeZero(value);
+            isInteger &= JSType.isStrictlyRepresentableAsInt(value);
 
             if (isInteger) {
                 return LiteralNode.newInstance(token, finish, (int)value);
-            } else if (isLong) {
-                return LiteralNode.newInstance(token, finish, (long)value);
             }
 
             return LiteralNode.newInstance(token, finish, value);

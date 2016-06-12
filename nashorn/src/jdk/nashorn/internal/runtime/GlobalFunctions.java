@@ -48,9 +48,6 @@ public final class GlobalFunctions {
     /** ParseInt - identity for ints */
     public static final MethodHandle PARSEINT_I = MH.dropArguments(MH.identity(int.class), 0, Object.class);
 
-    /** ParseInt - identity for longs */
-    public static final MethodHandle PARSEINT_J = MH.dropArguments(MH.identity(long.class), 0, Object.class);
-
     /** Methodhandle (specialized) to implementation of ECMA 15.1.2.2, parseInt */
     public static final MethodHandle PARSEINT_O = findOwnMH("parseInt", double.class, Object.class, Object.class);
 
@@ -187,14 +184,14 @@ public final class GlobalFunctions {
 
         double result = 0.0;
         int digit;
-        // we should see atleast one valid digit
+        // we should see at least one valid digit
         boolean entered = false;
         while (idx < length) {
             digit = fastDigit(str.charAt(idx++), radix);
             if (digit < 0) {
                 break;
             }
-            // we have seen atleast one valid digit in the specified radix
+            // we have seen at least one valid digit in the specified radix
             entered = true;
             result *= radix;
             result += digit;

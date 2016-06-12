@@ -25,7 +25,10 @@
 
 package jdk.nashorn.internal.ir;
 
+import java.io.IOException;
+import java.io.ObjectInputStream;
 import java.io.PrintWriter;
+import java.io.Serializable;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.StringTokenizer;
@@ -47,7 +50,9 @@ import jdk.nashorn.internal.runtime.options.Options;
  * refer to their location.
  */
 
-public final class Symbol implements Comparable<Symbol> {
+public final class Symbol implements Comparable<Symbol>, Cloneable, Serializable {
+    private static final long serialVersionUID = 1L;
+
     /** Is this Global */
     public static final int IS_GLOBAL   = 1;
     /** Is this a variable */
@@ -77,14 +82,12 @@ public final class Symbol implements Comparable<Symbol> {
     public static final int HAS_SLOT                = 1 << 10;
     /** Is this symbol known to store an int value ? */
     public static final int HAS_INT_VALUE           = 1 << 11;
-    /** Is this symbol known to store a long value ? */
-    public static final int HAS_LONG_VALUE          = 1 << 12;
     /** Is this symbol known to store a double value ? */
-    public static final int HAS_DOUBLE_VALUE        = 1 << 13;
+    public static final int HAS_DOUBLE_VALUE        = 1 << 12;
     /** Is this symbol known to store an object value ? */
-    public static final int HAS_OBJECT_VALUE        = 1 << 14;
+    public static final int HAS_OBJECT_VALUE        = 1 << 13;
     /** Is this symbol seen a declaration? Used for block scoped LET and CONST symbols only. */
-    public static final int HAS_BEEN_DECLARED       = 1 << 15;
+    public static final int HAS_BEEN_DECLARED       = 1 << 14;
 
     /** Null or name identifying symbol. */
     private final String name;
@@ -94,10 +97,10 @@ public final class Symbol implements Comparable<Symbol> {
 
     /** First bytecode method local variable slot for storing the value(s) of this variable. -1 indicates the variable
      * is not stored in local variable slots or it is not yet known. */
-    private int firstSlot = -1;
+    private transient int firstSlot = -1;
 
     /** Field number in scope or property; array index in varargs when not using arguments object. */
-    private int fieldIndex = -1;
+    private transient int fieldIndex = -1;
 
     /** Number of times this symbol is used in code */
     private int useCount;
@@ -141,6 +144,15 @@ public final class Symbol implements Comparable<Symbol> {
         this.flags      = flags;
         if(shouldTrace()) {
             trace("CREATE SYMBOL " + name);
+        }
+    }
+
+    @Override
+    public Symbol clone() {
+        try {
+            return (Symbol)super.clone();
+        } catch (final CloneNotSupportedException e) {
+            throw new AssertionError(e);
         }
     }
 
@@ -242,7 +254,6 @@ public final class Symbol implements Comparable<Symbol> {
      */
     public int slotCount() {
         return ((flags & HAS_INT_VALUE)    == 0 ? 0 : 1) +
-               ((flags & HAS_LONG_VALUE)   == 0 ? 0 : 2) +
                ((flags & HAS_DOUBLE_VALUE) == 0 ? 0 : 2) +
                ((flags & HAS_OBJECT_VALUE) == 0 ? 0 : 1);
     }
@@ -264,7 +275,6 @@ public final class Symbol implements Comparable<Symbol> {
                 append("slot=").
                 append(firstSlot).append(' ');
             if((flags & HAS_INT_VALUE) != 0) { sb.append('I'); }
-            if((flags & HAS_LONG_VALUE) != 0) { sb.append('J'); }
             if((flags & HAS_DOUBLE_VALUE) != 0) { sb.append('D'); }
             if((flags & HAS_OBJECT_VALUE) != 0) { sb.append('O'); }
             sb.append(')');
@@ -337,7 +347,7 @@ public final class Symbol implements Comparable<Symbol> {
      * Flag this symbol as scope as described in {@link Symbol#isScope()}
      * @return the symbol
      */
-     public Symbol setIsScope() {
+    public Symbol setIsScope() {
         if (!isScope()) {
             if(shouldTrace()) {
                 trace("SET IS SCOPE");
@@ -559,11 +569,6 @@ public final class Symbol implements Comparable<Symbol> {
             return typeSlot;
         }
         typeSlot += ((flags & HAS_INT_VALUE) == 0 ? 0 : 1);
-        if(type.isLong()) {
-            assert (flags & HAS_LONG_VALUE) != 0;
-            return typeSlot;
-        }
-        typeSlot += ((flags & HAS_LONG_VALUE) == 0 ? 0 : 2);
         if(type.isNumber()) {
             assert (flags & HAS_DOUBLE_VALUE) != 0;
             return typeSlot;
@@ -581,8 +586,6 @@ public final class Symbol implements Comparable<Symbol> {
     public boolean hasSlotFor(final Type type) {
         if(type.isBoolean() || type.isInteger()) {
             return (flags & HAS_INT_VALUE) != 0;
-        } else if(type.isLong()) {
-            return (flags & HAS_LONG_VALUE) != 0;
         } else if(type.isNumber()) {
             return (flags & HAS_DOUBLE_VALUE) != 0;
         }
@@ -597,8 +600,6 @@ public final class Symbol implements Comparable<Symbol> {
     public void setHasSlotFor(final Type type) {
         if(type.isBoolean() || type.isInteger()) {
             setFlag(HAS_INT_VALUE);
-        } else if(type.isLong()) {
-            setFlag(HAS_LONG_VALUE);
         } else if(type.isNumber()) {
             setFlag(HAS_DOUBLE_VALUE);
         } else {
@@ -609,11 +610,11 @@ public final class Symbol implements Comparable<Symbol> {
 
     /**
      * Increase the symbol's use count by one.
-     * @return the symbol
      */
-    public Symbol increaseUseCount() {
-        useCount++;
-        return this;
+    public void increaseUseCount() {
+        if (isScope()) { // Avoid dirtying a cache line; we only need the use count for scoped symbols
+            useCount++;
+        }
     }
 
     /**
@@ -668,5 +669,11 @@ public final class Symbol implements Comparable<Symbol> {
         if (TRACE_SYMBOLS_STACKTRACE != null && (TRACE_SYMBOLS_STACKTRACE.isEmpty() || TRACE_SYMBOLS_STACKTRACE.contains(name))) {
             new Throwable().printStackTrace(Context.getCurrentErr());
         }
+    }
+
+    private void readObject(final ObjectInputStream in) throws ClassNotFoundException, IOException {
+        in.defaultReadObject();
+        firstSlot = -1;
+        fieldIndex = -1;
     }
 }
